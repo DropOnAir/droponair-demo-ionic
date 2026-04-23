@@ -6,6 +6,8 @@ import {
   type DropOnAirEvent,
   type GroupInfo,
   type DecryptedGroupMessage,
+  type MessageEditEvent,
+  type MessageDeleteEvent,
 } from '@droponair/sdk-js';
 import { environment } from '../../environments/environment';
 import { AuthService } from './auth.service';
@@ -17,6 +19,8 @@ export interface ChatMessage {
   timestamp: number;
   isSelf: boolean;
   groupId?: string;
+  edited?: boolean;
+  deleted?: boolean;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -77,6 +81,24 @@ export class ChatService {
       }]);
     });
 
+    // Register message-edit listener (sender re-encrypts; SDK delivers new plaintext)
+    this.client.onMessageEdit((event: MessageEditEvent) => {
+      this.messages.update(prev => prev.map(m =>
+        m.id === event.originalMessageId
+          ? { ...m, text: event.plaintext, edited: true, deleted: false }
+          : m,
+      ));
+    });
+
+    // Register message-delete listener (FOR_EVERYONE on recipient side, FOR_ME on sender's other devices)
+    this.client.onMessageDelete((event: MessageDeleteEvent) => {
+      this.messages.update(prev => prev.map(m =>
+        m.id === event.originalMessageId
+          ? { ...m, text: '(message deleted)', deleted: true, edited: false }
+          : m,
+      ));
+    });
+
     // Register call event listener
     this.client.onCallEvent((event) => {
       switch (event.type) {
@@ -133,6 +155,34 @@ export class ChatService {
       timestamp:  Date.now(),
       isSelf:     true,
     }]);
+  }
+
+  /** Edit a previously sent direct message. Sender device only. */
+  async editMessage(originalMessageId: string, toUserId: string, newText: string): Promise<void> {
+    if (!this.client) throw new Error('Not connected');
+    await this.client.editMessage(originalMessageId, toUserId, newText);
+    // Optimistic local update on sender device.
+    this.messages.update(prev => prev.map(m =>
+      m.id === originalMessageId
+        ? { ...m, text: newText, edited: true, deleted: false }
+        : m,
+    ));
+  }
+
+  /** Delete a previously sent direct message. Sender device only. */
+  async deleteMessage(
+    originalMessageId: string,
+    toUserId: string,
+    scope: 'FOR_EVERYONE' | 'FOR_ME' = 'FOR_EVERYONE',
+  ): Promise<void> {
+    if (!this.client) throw new Error('Not connected');
+    await this.client.deleteMessage(originalMessageId, toUserId, scope);
+    // Optimistic local update on sender device.
+    this.messages.update(prev => prev.map(m =>
+      m.id === originalMessageId
+        ? { ...m, text: '(message deleted)', deleted: true, edited: false }
+        : m,
+    ));
   }
 
   disconnect(): void {

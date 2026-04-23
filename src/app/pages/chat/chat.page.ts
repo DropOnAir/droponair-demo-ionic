@@ -7,7 +7,8 @@ import {
   IonButtons, IonBackButton, IonSegment, IonSegmentButton, IonList,
 } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
-import { sendOutline, callOutline, closeCircleOutline, addOutline, peopleOutline } from 'ionicons/icons';
+import { sendOutline, callOutline, closeCircleOutline, addOutline, peopleOutline, createOutline, trashOutline } from 'ionicons/icons';
+import { ActionSheetController, AlertController } from '@ionic/angular/standalone';
 import { AuthService } from '../../services/auth.service';
 import { ChatService } from '../../services/chat.service';
 
@@ -56,14 +57,19 @@ import { ChatService } from '../../services/chat.service';
       @if (tab() === 'dm') {
         @for (msg of chat.messages(); track msg.id) {
           <div [style.textAlign]="msg.isSelf ? 'right' : 'left'" style="margin-bottom:8px">
-            <div style="display:inline-block;padding:8px 12px;border-radius:12px;max-width:75%"
-                 [style.backgroundColor]="msg.isSelf ? '#3880ff' : '#f4f5f8'"
-                 [style.color]="msg.isSelf ? 'white' : '#222'">
+            <div style="display:inline-block;padding:8px 12px;border-radius:12px;max-width:75%;cursor:pointer"
+                 [style.backgroundColor]="msg.deleted ? '#ddd' : (msg.isSelf ? '#3880ff' : '#f4f5f8')"
+                 [style.color]="msg.deleted ? '#666' : (msg.isSelf ? 'white' : '#222')"
+                 [style.fontStyle]="msg.deleted ? 'italic' : 'normal'"
+                 (click)="onMessageTap(msg)">
               @if (!msg.isSelf) {
                 <div style="font-size:11px;opacity:.6;margin-bottom:2px">{{ msg.fromUserId }}</div>
               }
               <div>{{ msg.text }}</div>
-              <div style="font-size:10px;opacity:.6;margin-top:2px">{{ msg.timestamp | date:'HH:mm' }}</div>
+              <div style="font-size:10px;opacity:.6;margin-top:2px">
+                {{ msg.timestamp | date:'HH:mm' }}
+                @if (msg.edited) { <span> · edited</span> }
+              </div>
             </div>
           </div>
         }
@@ -169,8 +175,10 @@ export class ChatPage implements AfterViewChecked {
   constructor(
     readonly auth: AuthService,
     readonly chat: ChatService,
+    private readonly actionSheetCtrl: ActionSheetController,
+    private readonly alertCtrl: AlertController,
   ) {
-    addIcons({ sendOutline, callOutline, closeCircleOutline, addOutline, peopleOutline });
+    addIcons({ sendOutline, callOutline, closeCircleOutline, addOutline, peopleOutline, createOutline, trashOutline });
   }
 
   ngAfterViewChecked(): void {
@@ -226,6 +234,58 @@ export class ChatPage implements AfterViewChecked {
       await this.chat.endCall();
     } catch (e) {
       console.error('End call error', e);
+    }
+  }
+
+  // ── Edit / Delete (sender-only on own DM messages) ────────────────────────
+
+  async onMessageTap(msg: { id: string; isSelf: boolean; text: string; deleted?: boolean }): Promise<void> {
+    // Only the sender can edit or delete, and a deleted message cannot be edited again.
+    if (!msg.isSelf || msg.deleted) return;
+    const to = this.toUserId.trim();
+    if (!to) return;
+
+    const sheet = await this.actionSheetCtrl.create({
+      header: 'Message',
+      buttons: [
+        { text: 'Edit', icon: 'create-outline', handler: () => { this.promptEdit(msg.id, to, msg.text); return true; } },
+        { text: 'Delete for everyone', icon: 'trash-outline', role: 'destructive', handler: () => { this.confirmDelete(msg.id, to, 'FOR_EVERYONE'); return true; } },
+        { text: 'Delete for me', icon: 'trash-outline', handler: () => { this.confirmDelete(msg.id, to, 'FOR_ME'); return true; } },
+        { text: 'Cancel', role: 'cancel' },
+      ],
+    });
+    await sheet.present();
+  }
+
+  private async promptEdit(messageId: string, toUserId: string, currentText: string): Promise<void> {
+    const alert = await this.alertCtrl.create({
+      header: 'Edit message',
+      inputs: [{ name: 'newText', type: 'text', value: currentText, placeholder: 'New text' }],
+      buttons: [
+        { text: 'Cancel', role: 'cancel' },
+        {
+          text: 'Save',
+          handler: async (data) => {
+            const next = (data?.newText ?? '').trim();
+            if (!next || next === currentText) return true;
+            try {
+              await this.chat.editMessage(messageId, toUserId, next);
+            } catch (e) {
+              console.error('Edit error', e);
+            }
+            return true;
+          },
+        },
+      ],
+    });
+    await alert.present();
+  }
+
+  private async confirmDelete(messageId: string, toUserId: string, scope: 'FOR_EVERYONE' | 'FOR_ME'): Promise<void> {
+    try {
+      await this.chat.deleteMessage(messageId, toUserId, scope);
+    } catch (e) {
+      console.error('Delete error', e);
     }
   }
 
