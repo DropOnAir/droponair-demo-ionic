@@ -7,7 +7,7 @@ import {
   IonButtons, IonBackButton, IonSegment, IonSegmentButton, IonList,
 } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
-import { sendOutline, callOutline, closeCircleOutline, addOutline, peopleOutline, createOutline, trashOutline, attachOutline } from 'ionicons/icons';
+import { sendOutline, callOutline, closeCircleOutline, addOutline, peopleOutline, createOutline, trashOutline, attachOutline, desktopOutline } from 'ionicons/icons';
 import { ActionSheetController, AlertController } from '@ionic/angular/standalone';
 import { AuthService } from '../../services/auth.service';
 import { ChatService } from '../../services/chat.service';
@@ -51,6 +51,17 @@ import { ChatService } from '../../services/chat.service';
           <span>📞 Incoming call from <strong>{{ chat.incomingCall()!.from }}</strong></span>
           <ion-button size="small" color="success" (click)="acceptCall()">Accept</ion-button>
           <ion-button size="small" color="danger" (click)="rejectCall()">Reject</ion-button>
+        </div>
+      }
+
+      @if (chat.peerScreenSharing()) {
+        <div style="background:#fef3c7;color:#92400e;padding:8px 12px;border-radius:8px;margin-bottom:8px;font-size:13px;display:flex;align-items:center;gap:6px">
+          🖥️ <span>Peer is sharing their screen.</span>
+        </div>
+      }
+      @if (chat.amScreenSharing()) {
+        <div style="background:#dcfce7;color:#166534;padding:8px 12px;border-radius:8px;margin-bottom:8px;font-size:13px;display:flex;align-items:center;gap:6px">
+          🖥️ <span>You are sharing your screen.</span>
         </div>
       }
 
@@ -161,6 +172,12 @@ import { ChatService } from '../../services/chat.service';
             <ion-icon slot="icon-only" name="send-outline" />
           </ion-button>
           @if (chat.activeCallId()) {
+            <ion-button
+              fill="clear"
+              [color]="chat.amScreenSharing() ? 'warning' : 'medium'"
+              (click)="toggleScreenShare()">
+              <ion-icon slot="icon-only" name="desktop-outline" />
+            </ion-button>
             <ion-button fill="clear" color="danger" (click)="endCall()">
               <ion-icon slot="icon-only" name="close-circle-outline" />
             </ion-button>
@@ -206,7 +223,7 @@ export class ChatPage implements AfterViewChecked {
     private readonly actionSheetCtrl: ActionSheetController,
     private readonly alertCtrl: AlertController,
   ) {
-    addIcons({ sendOutline, callOutline, closeCircleOutline, addOutline, peopleOutline, createOutline, trashOutline, attachOutline });
+    addIcons({ sendOutline, callOutline, closeCircleOutline, addOutline, peopleOutline, createOutline, trashOutline, attachOutline, desktopOutline });
   }
 
   ngAfterViewChecked(): void {
@@ -292,6 +309,18 @@ export class ChatPage implements AfterViewChecked {
       await this.chat.endCall();
     } catch (e) {
       console.error('End call error', e);
+    }
+  }
+
+  async toggleScreenShare(): Promise<void> {
+    try {
+      if (this.chat.amScreenSharing()) {
+        await this.chat.stopScreenShareDemo();
+      } else {
+        await this.chat.startScreenShareDemo();
+      }
+    } catch (e) {
+      console.error('Screen share error', e);
     }
   }
 

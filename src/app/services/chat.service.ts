@@ -40,6 +40,10 @@ export class ChatService {
   readonly activeCallId = signal<string | null>(null);
   readonly callStatus = signal<string>('');
   readonly incomingCall = signal<{ callId: string; from: string } | null>(null);
+  /** True while the local user is screen-sharing (phase1/screen-sharing). */
+  readonly amScreenSharing = signal<boolean>(false);
+  /** True while the call peer has signalled they are sharing their screen. */
+  readonly peerScreenSharing = signal<boolean>(false);
 
   // Group state
   readonly groups = signal<GroupInfo[]>([]);
@@ -129,11 +133,19 @@ export class ChatService {
           this.activeCallId.set(null);
           this.callStatus.set('');
           this.incomingCall.set(null);
+          this.peerScreenSharing.set(false);
+          this.amScreenSharing.set(false);
           break;
         case 'CALL_DENIED_LIMIT_REACHED':
           this.activeCallId.set(null);
           this.callStatus.set('Call limit reached');
           this.incomingCall.set(null);
+          break;
+        case 'CALL_SCREEN_SHARE_STARTED':
+          this.peerScreenSharing.set(true);
+          break;
+        case 'CALL_SCREEN_SHARE_STOPPED':
+          this.peerScreenSharing.set(false);
           break;
       }
     });
@@ -258,6 +270,43 @@ export class ChatService {
     await this.client.endCall(callId);
     this.activeCallId.set(null);
     this.callStatus.set('');
+    this.peerScreenSharing.set(false);
+    this.amScreenSharing.set(false);
+  }
+
+  /**
+   * Demo screen-share signaling. A real app would also call
+   *   peerConnection.addTrack(stream.getVideoTracks()[0], stream)
+   * to actually send the screen pixels to the peer over the existing
+   * WebRTC connection. This demo only exercises the SDK signaling
+   * surface so you can confirm the platform routing.
+   */
+  async startScreenShareDemo(): Promise<void> {
+    const callId = this.activeCallId();
+    if (!this.client || !callId) return;
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    } catch {
+      // User cancelled the picker.
+      return;
+    }
+    const track = stream.getVideoTracks()[0];
+    if (!track) return;
+    this.client.startScreenShare(callId);
+    this.amScreenSharing.set(true);
+    this.callStatus.set('Sharing screen');
+    track.onended = () => {
+      void this.stopScreenShareDemo();
+    };
+  }
+
+  async stopScreenShareDemo(): Promise<void> {
+    const callId = this.activeCallId();
+    if (!this.client || !callId) return;
+    this.client.stopScreenShare(callId);
+    this.amScreenSharing.set(false);
+    this.callStatus.set('Call active');
   }
 
   // ── Group methods ─────────────────────────────────────────────────────────
