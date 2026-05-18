@@ -1,5 +1,5 @@
 import { Component, computed, signal, ViewChild, ElementRef, AfterViewChecked } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
   IonContent, IonHeader, IonTitle, IonToolbar, IonFooter,
@@ -7,7 +7,7 @@ import {
   IonButtons, IonBackButton, IonSegment, IonSegmentButton, IonList,
 } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
-import { sendOutline, callOutline, closeCircleOutline, addOutline, peopleOutline, createOutline, trashOutline } from 'ionicons/icons';
+import { sendOutline, callOutline, closeCircleOutline, addOutline, peopleOutline, createOutline, trashOutline, attachOutline } from 'ionicons/icons';
 import { ActionSheetController, AlertController } from '@ionic/angular/standalone';
 import { AuthService } from '../../services/auth.service';
 import { ChatService } from '../../services/chat.service';
@@ -16,7 +16,7 @@ import { ChatService } from '../../services/chat.service';
   selector: 'app-chat',
   standalone: true,
   imports: [
-    FormsModule, DatePipe,
+    FormsModule, DatePipe, DecimalPipe,
     IonContent, IonHeader, IonTitle, IonToolbar, IonFooter,
     IonItem, IonLabel, IonInput, IonButton, IonIcon, IonBadge,
     IonButtons, IonBackButton, IonSegment, IonSegmentButton, IonList,
@@ -66,6 +66,22 @@ import { ChatService } from '../../services/chat.service';
                 <div style="font-size:11px;opacity:.6;margin-bottom:2px">{{ msg.fromUserId }}</div>
               }
               <div>{{ msg.text }}</div>
+              @if (msg.attachments && msg.attachments.length > 0) {
+                <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
+                  @for (att of msg.attachments; track att.ref.attachmentId) {
+                    <div (click)="$event.stopPropagation(); openAttachment(att)"
+                         style="display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,0.08);border-radius:8px;cursor:pointer;">
+                      <span>📎</span>
+                      <span style="font-size:11px;">
+                        {{ att.ref.mimeType || 'file' }} · {{ (att.ref.sizeBytes / 1024) | number:'1.0-0' }} KB
+                      </span>
+                    </div>
+                    @if (att.objectUrl && (att.ref.mimeType || '').startsWith('image/')) {
+                      <img [src]="att.objectUrl" style="max-width:240px;border-radius:8px;display:block" />
+                    }
+                  }
+                </div>
+              }
               <div style="font-size:10px;opacity:.6;margin-top:2px">
                 {{ msg.timestamp | date:'HH:mm' }}
                 @if (msg.edited) { <span> · edited</span> }
@@ -131,7 +147,17 @@ import { ChatService } from '../../services/chat.service';
             (keyup.enter)="send()"
             style="flex:1"
           />
-          <ion-button fill="clear" (click)="send()" [disabled]="!messageText.trim()">
+          <input
+            type="file"
+            #fileInput
+            accept="image/*,video/*"
+            (change)="onFilePicked($event)"
+            style="display:none"
+          />
+          <ion-button fill="clear" (click)="fileInput.click()" [disabled]="!toUserId.trim() || uploading">
+            <ion-icon slot="icon-only" name="attach-outline" />
+          </ion-button>
+          <ion-button fill="clear" (click)="send()" [disabled]="!messageText.trim() && pendingAttachments.length === 0">
             <ion-icon slot="icon-only" name="send-outline" />
           </ion-button>
           @if (chat.activeCallId()) {
@@ -167,6 +193,8 @@ export class ChatPage implements AfterViewChecked {
   tab          = signal<'dm' | 'groups'>('dm');
   toUserId     = '';
   messageText  = '';
+  pendingAttachments: import('@droponair/sdk-js').AttachmentRef[] = [];
+  uploading = false;
   newGroupName    = '';
   newGroupMembers = '';
   groupMessageText = '';
@@ -178,7 +206,7 @@ export class ChatPage implements AfterViewChecked {
     private readonly actionSheetCtrl: ActionSheetController,
     private readonly alertCtrl: AlertController,
   ) {
-    addIcons({ sendOutline, callOutline, closeCircleOutline, addOutline, peopleOutline, createOutline, trashOutline });
+    addIcons({ sendOutline, callOutline, closeCircleOutline, addOutline, peopleOutline, createOutline, trashOutline, attachOutline });
   }
 
   ngAfterViewChecked(): void {
@@ -190,12 +218,42 @@ export class ChatPage implements AfterViewChecked {
   async send(): Promise<void> {
     const text = this.messageText.trim();
     const to   = this.toUserId.trim();
-    if (!text || !to) return;
+    if (!to) return;
+    if (!text && this.pendingAttachments.length === 0) return;
+    const attachmentsToSend = this.pendingAttachments;
+    this.pendingAttachments = [];
     this.messageText = '';
     try {
-      await this.chat.sendMessage(to, text);
+      await this.chat.sendMessage(to, text, attachmentsToSend);
     } catch (e) {
       console.error('Send error', e);
+    }
+  }
+
+  async onFilePicked(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = ''; // allow re-selecting the same file
+    if (!file) return;
+    const to = this.toUserId.trim();
+    if (!to) return;
+    this.uploading = true;
+    try {
+      const ref = await this.chat.prepareAttachment(file, to);
+      this.pendingAttachments = [...this.pendingAttachments, ref];
+    } catch (e) {
+      console.error('Attachment upload error', e);
+    } finally {
+      this.uploading = false;
+    }
+  }
+
+  async openAttachment(att: import('../../services/chat.service').ChatAttachment): Promise<void> {
+    try {
+      const url = await this.chat.openAttachment(att);
+      window.open(url, '_blank');
+    } catch (e) {
+      console.error('Attachment open error', e);
     }
   }
 

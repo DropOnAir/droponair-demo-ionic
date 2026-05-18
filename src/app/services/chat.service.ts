@@ -8,9 +8,16 @@ import {
   type DecryptedGroupMessage,
   type MessageEditEvent,
   type MessageDeleteEvent,
+  type AttachmentRef,
 } from '@droponair/sdk-js';
 import { environment } from '../../environments/environment';
 import { AuthService } from './auth.service';
+
+export interface ChatAttachment {
+  ref: AttachmentRef;
+  /** Decrypted bytes once the user taps to view. Lazy. */
+  objectUrl?: string;
+}
 
 export interface ChatMessage {
   id: string;
@@ -21,6 +28,7 @@ export interface ChatMessage {
   groupId?: string;
   edited?: boolean;
   deleted?: boolean;
+  attachments?: ChatAttachment[];
 }
 
 @Injectable({ providedIn: 'root' })
@@ -78,6 +86,7 @@ export class ChatService {
         text:       msg.plaintext,
         timestamp:  msg.timestamp,
         isSelf:     false,
+        attachments: (msg.attachments ?? []).map(ref => ({ ref })),
       }]);
     });
 
@@ -142,10 +151,10 @@ export class ChatService {
     });
   }
 
-  async sendMessage(toUserId: string, text: string): Promise<void> {
+  async sendMessage(toUserId: string, text: string, attachments: AttachmentRef[] = []): Promise<void> {
     if (!this.client) throw new Error('Not connected');
     const myId = this.auth.userId()!;
-    const { messageId: clientMsgId } = await this.client.sendMessage(toUserId, text);
+    const { messageId: clientMsgId } = await this.client.sendMessage(toUserId, text, { attachments });
 
     // Optimistically add to local messages
     this.messages.update(prev => [...prev, {
@@ -154,7 +163,30 @@ export class ChatService {
       text,
       timestamp:  Date.now(),
       isSelf:     true,
+      attachments: attachments.map(ref => ({ ref })),
     }]);
+  }
+
+  /** Encrypt + upload an image attachment via the SDK, returns the ref to embed in sendMessage. */
+  async prepareAttachment(file: File, toUserId: string): Promise<AttachmentRef> {
+    if (!this.client) throw new Error('Not connected');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    return this.client.prepareAttachmentAndUpload(bytes, {
+      toUserId,
+      mimeType: file.type || 'application/octet-stream',
+      encryptionType: 'E2EE',
+    });
+  }
+
+  /** Download + decrypt an attachment. Returns a local blob URL the UI can render. */
+  async openAttachment(attachment: ChatAttachment): Promise<string> {
+    if (!this.client) throw new Error('Not connected');
+    if (attachment.objectUrl) return attachment.objectUrl;
+    const dl = await this.client.downloadAttachment(attachment.ref);
+    const blob = new Blob([dl.bytes], { type: dl.mimeType || 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    attachment.objectUrl = url;
+    return url;
   }
 
   /** Edit a previously sent direct message. Sender device only. */
