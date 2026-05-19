@@ -71,6 +71,13 @@ export class ChatService {
         case 'CONNECTED':
           console.log('[DropOnAir] connected');
           this.isConnected.set(true);
+          // Demonstrate web-push token registration once connected.
+          // In a real app you'd run this once per app launch after the user
+          // has granted Notification permission and PushManager.subscribe()
+          // has returned a subscription. The browser-side SDK forwards the
+          // opaque subscription JSON to the platform, which signs the push
+          // with your VAPID private key when a sender attaches a pushPayload.
+          this.registerWebPushTokenIfPermitted();
           break;
         case 'DISCONNECTED':
           console.warn('[DropOnAir] disconnected');
@@ -344,5 +351,32 @@ export class ChatService {
   selectGroup(groupId: string | null): void {
     this.activeGroupId.set(groupId);
     this.groupMessages.set([]);
+  }
+
+  /**
+   * Demonstrates the Web Push registration flow. Customers configure the
+   * matching VAPID keypair in the DropOnAir dashboard; the platform signs
+   * each push with the private key.
+   */
+  private async registerWebPushTokenIfPermitted(): Promise<void> {
+    if (!this.client) return;
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+      return;
+    }
+    if (Notification.permission !== 'granted') {
+      return;
+    }
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (!sub) return;
+      await this.client.registerPushToken({
+        platform: 'WEB_PUSH',
+        token: JSON.stringify(sub.toJSON()),
+      });
+      console.log('[DropOnAir] push token registered');
+    } catch (e) {
+      console.warn('[DropOnAir] push token registration skipped', e);
+    }
   }
 }
