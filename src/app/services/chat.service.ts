@@ -327,7 +327,10 @@ export class ChatService {
   async sendGroupMessage(groupId: string, text: string): Promise<void> {
     if (!this.client) throw new Error('Not connected');
     const myId = this.auth.userId()!;
-    await this.client.sendGroupMessage(groupId, text);
+    // Demo uses cleartext group messages (server fans out to all members).
+    // For end-to-end encrypted group sends, use client.sendGroupMessage with
+    // the explicit member list (Android/iOS-parity API since SDK 0.8.0).
+    await this.client.sendCleartextGroupMessage(groupId, text);
     this.groupMessages.update(prev => [...prev, {
       id:         crypto.randomUUID(),
       fromUserId: myId,
