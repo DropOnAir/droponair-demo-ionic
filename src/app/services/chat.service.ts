@@ -40,7 +40,7 @@ export class ChatService {
   readonly activeCallId = signal<string | null>(null);
   readonly callStatus = signal<string>('');
   readonly incomingCall = signal<{ callId: string; from: string } | null>(null);
-  /** True while the local user is screen-sharing (phase1/screen-sharing). */
+  /** True while the local user is screen-sharing. */
   readonly amScreenSharing = signal<boolean>(false);
   /** True while the call peer has signalled they are sharing their screen. */
   readonly peerScreenSharing = signal<boolean>(false);
